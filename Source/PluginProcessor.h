@@ -30,7 +30,8 @@ public:
     void setRuntimeParameters(float smoothnessMs,
                               float harmonicWidth,
                               float harmonicsBalance,
-                              float slope);
+                              float slope,
+                              float separationBeta);
     void setDebugOutput(bool shouldOutput, juce::String label);
     float getSmoothedF0Hz() const noexcept;
 
@@ -41,11 +42,14 @@ private:
     static constexpr float spectralContrastThreshold = 5.0f;
     static constexpr float harmonicToleranceBinsBase = 1.5f;
     static constexpr float harmonicToleranceGrowth = 0.02f;
+    static constexpr float maskSmoothAlpha = 0.4f;
     static constexpr float gaussianMaskCutoffSigma = 4.0f;
     static constexpr float transientAttackRatioThreshold = 2.5f;
     static constexpr float transientAttackDeltaThreshold = 0.015f;
     static constexpr float transientFloorRms = 1.0e-4f;
+    static constexpr float wienerExponent = 2.0f;
     static constexpr int phaseLockNeighbourBins = 2;
+    static constexpr int spectralMedianLength = 7;
     static constexpr int medianFilterLength = 5;
     static constexpr int debugPrintIntervalFrames = 24;
 
@@ -54,6 +58,7 @@ private:
 
     float estimateF0Hz(float framePower);
     bool detectTransient(float framePower);
+    void computeTemporalStationarity();
     float updateSmoothedF0(float candidateHz);
     float applyMedianFilter(float candidateHz);
     void buildMasks(float trackedF0Hz, bool forceNonHarmonics);
@@ -72,9 +77,14 @@ private:
     std::array<float, fftSize * 2> harmonicsBSpectrum{};
     std::array<float, fftSize * 2> nonHarmonicsSpectrum{};
     std::array<float, (fftSize / 2) + 1> magnitudeSpectrum{};
+    std::array<std::array<float, (fftSize / 2) + 1>, spectralMedianLength> magnitudeHistory{};
+    std::array<float, (fftSize / 2) + 1> stationarityWeight{};
     std::array<float, (fftSize / 2) + 1> maskA{};
     std::array<float, (fftSize / 2) + 1> maskB{};
     std::array<float, (fftSize / 2) + 1> maskN{};
+    std::array<float, (fftSize / 2) + 1> prevMaskA{};
+    std::array<float, (fftSize / 2) + 1> prevMaskB{};
+    std::array<float, (fftSize / 2) + 1> prevMaskN{};
     std::array<float, medianFilterLength> medianHistory{};
 
     std::vector<float> inputQueue;
@@ -91,6 +101,8 @@ private:
     int nextFrameStart = 0;
     int minTrackedBin = 1;
     int maxTrackedBin = (fftSize / 2) - 1;
+    int magnitudeHistoryWriteIndex = 0;
+    int magnitudeHistoryCount = 0;
     int medianWriteIndex = 0;
     int medianHistoryCount = 0;
     int debugFrameCounter = 0;
@@ -98,6 +110,7 @@ private:
     float harmonicWidth = 1.0f;
     float harmonicsBalance = 0.0f;
     float slope = 1.0f;
+    float separationBeta = 2.0f;
     float smoothingAlpha = 0.85f;
     float ifftScale = 1.0f;
     float smoothedF0Hz = 0.0f;
@@ -168,6 +181,7 @@ private:
     std::atomic<float>* harmonicWidthParam = nullptr;
     std::atomic<float>* harmonicsBalanceParam = nullptr;
     std::atomic<float>* slopeParam = nullptr;
+    std::atomic<float>* separationParam = nullptr;
     std::atomic<float>* gainAParam = nullptr;
     std::atomic<float>* gainBParam = nullptr;
     std::atomic<float>* gainNonharmParam = nullptr;

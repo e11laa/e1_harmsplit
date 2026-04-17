@@ -35,9 +35,16 @@ ChannelSpectralSplitter::ChannelSpectralSplitter()
         windowSquared[sample] = analysisWindow[sample] * analysisWindow[sample];
 
     magnitudeSpectrum.fill(0.0f);
+    for (auto& historyFrame : magnitudeHistory)
+        historyFrame.fill(0.0f);
+
+    stationarityWeight.fill(1.0f);
     maskA.fill(0.0f);
     maskB.fill(0.0f);
     maskN.fill(1.0f);
+    prevMaskA.fill(0.0f);
+    prevMaskB.fill(0.0f);
+    prevMaskN.fill(1.0f);
     medianHistory.fill(0.0f);
 
     ifftScale = measureIfftScale();
@@ -60,7 +67,7 @@ void ChannelSpectralSplitter::prepare(double sampleRate, int maxBlockSize)
         nyquistBin,
         static_cast<int>(std::ceil(maxTrackedPitchHz / binWidthHz)));
 
-    setRuntimeParameters(smoothnessMs, harmonicWidth, harmonicsBalance, slope);
+    setRuntimeParameters(smoothnessMs, harmonicWidth, harmonicsBalance, slope, separationBeta);
     reset();
 
     const auto reserveSize = juce::jmax(fftSize * 2, maxBlockSize + fftSize + hopSize);
@@ -87,11 +94,20 @@ void ChannelSpectralSplitter::reset()
     outputQueueN.clear();
 
     medianHistory.fill(0.0f);
+    for (auto& historyFrame : magnitudeHistory)
+        historyFrame.fill(0.0f);
+
+    stationarityWeight.fill(1.0f);
     maskA.fill(0.0f);
     maskB.fill(0.0f);
     maskN.fill(1.0f);
+    prevMaskA.fill(0.0f);
+    prevMaskB.fill(0.0f);
+    prevMaskN.fill(1.0f);
 
     nextFrameStart = 0;
+    magnitudeHistoryWriteIndex = 0;
+    magnitudeHistoryCount = 0;
     medianWriteIndex = 0;
     medianHistoryCount = 0;
     debugFrameCounter = 0;
@@ -134,12 +150,14 @@ void ChannelSpectralSplitter::processBlock(const float* input,
 void ChannelSpectralSplitter::setRuntimeParameters(float newSmoothnessMs,
                                                    float newHarmonicWidth,
                                                    float newHarmonicsBalance,
-                                                   float newSlope)
+                                                   float newSlope,
+                                                   float newSeparationBeta)
 {
     smoothnessMs = juce::jlimit(0.0f, 100.0f, newSmoothnessMs);
     harmonicWidth = juce::jlimit(0.1f, 2.0f, newHarmonicWidth);
     harmonicsBalance = juce::jlimit(-1.0f, 1.0f, newHarmonicsBalance);
     slope = juce::jlimit(0.25f, 4.0f, newSlope);
+    separationBeta = juce::jlimit(1.0f, 8.0f, newSeparationBeta);
     smoothingAlpha = toSmoothingAlpha(sampleRateHz, hopSize, smoothnessMs);
 }
 
@@ -179,6 +197,13 @@ void ChannelSpectralSplitter::processAvailableFrames()
         fft.performRealOnlyForwardTransform(inputSpectrum.data());
 
         const auto trackedF0Hz = estimateF0Hz(framePower);
+
+        magnitudeHistory[static_cast<size_t>(magnitudeHistoryWriteIndex)] = magnitudeSpectrum;
+        magnitudeHistoryWriteIndex = (magnitudeHistoryWriteIndex + 1) % spectralMedianLength;
+        magnitudeHistoryCount = juce::jmin(magnitudeHistoryCount + 1, spectralMedianLength);
+
+        computeTemporalStationarity();
+
         const auto forceNonHarmonics = detectTransient(framePower);
 
         buildMasks(trackedF0Hz, forceNonHarmonics);
@@ -334,6 +359,39 @@ bool ChannelSpectralSplitter::detectTransient(float framePower)
     return isTransient;
 }
 
+void ChannelSpectralSplitter::computeTemporalStationarity()
+{
+    constexpr int nyquistBin = fftSize / 2;
+    constexpr float epsilon = 1.0e-12f;
+
+    if (magnitudeHistoryCount <= 1)
+    {
+        stationarityWeight.fill(1.0f);
+        return;
+    }
+
+    for (int bin = 0; bin <= nyquistBin; ++bin)
+    {
+        std::array<float, spectralMedianLength> medianBuffer{};
+
+        for (int historyIndex = 0; historyIndex < magnitudeHistoryCount; ++historyIndex)
+            medianBuffer[static_cast<size_t>(historyIndex)] = magnitudeHistory[static_cast<size_t>(historyIndex)][static_cast<size_t>(bin)];
+
+        const auto medianIndex = magnitudeHistoryCount / 2;
+
+        std::nth_element(
+            medianBuffer.begin(),
+            medianBuffer.begin() + medianIndex,
+            medianBuffer.begin() + magnitudeHistoryCount);
+
+        const auto medianMagnitude = medianBuffer[static_cast<size_t>(medianIndex)];
+        const auto currentMagnitude = magnitudeSpectrum[static_cast<size_t>(bin)];
+        const auto stationarity = medianMagnitude / juce::jmax(currentMagnitude, epsilon);
+
+        stationarityWeight[static_cast<size_t>(bin)] = juce::jlimit(0.0f, 1.0f, stationarity);
+    }
+}
+
 float ChannelSpectralSplitter::updateSmoothedF0(float candidateHz)
 {
     if (candidateHz <= 0.0f)
@@ -389,18 +447,36 @@ void ChannelSpectralSplitter::buildMasks(float trackedF0Hz, bool forceNonHarmoni
     maskB.fill(0.0f);
     maskN.fill(1.0f);
 
+    constexpr int nyquistBin = fftSize / 2;
+
     if (forceNonHarmonics)
+    {
+        prevMaskA.fill(0.0f);
+        prevMaskB.fill(0.0f);
+        prevMaskN.fill(1.0f);
         return;
+    }
 
     if (trackedF0Hz <= 0.0f)
+    {
+        constexpr float noPitchDecayAlpha = 0.2f;
+
+        for (int bin = 0; bin <= nyquistBin; ++bin)
+        {
+            const auto index = static_cast<size_t>(bin);
+
+            prevMaskA[index] *= noPitchDecayAlpha;
+            prevMaskB[index] *= noPitchDecayAlpha;
+            prevMaskN[index] = juce::jlimit(0.0f, 1.0f, 1.0f - (prevMaskA[index] + prevMaskB[index]));
+        }
+
         return;
+    }
 
     const auto oddToB = juce::jmax(0.0f, harmonicsBalance);
     const auto oddToA = 1.0f - oddToB;
     const auto evenToA = juce::jmax(0.0f, -harmonicsBalance);
     const auto evenToB = 1.0f - evenToA;
-
-    constexpr int nyquistBin = fftSize / 2;
 
     for (int bin = 1; bin < nyquistBin; ++bin)
     {
@@ -422,6 +498,7 @@ void ChannelSpectralSplitter::buildMasks(float trackedF0Hz, bool forceNonHarmoni
 
         auto harmonicWeight = std::exp(-0.5f * normalizedDistance * normalizedDistance);
         harmonicWeight = std::pow(juce::jlimit(0.0f, 1.0f, harmonicWeight), slope);
+        harmonicWeight *= stationarityWeight[static_cast<size_t>(bin)];
 
         float weightA = 0.0f;
         float weightB = 0.0f;
@@ -437,11 +514,51 @@ void ChannelSpectralSplitter::buildMasks(float trackedF0Hz, bool forceNonHarmoni
             weightB = harmonicWeight * evenToB;
         }
 
+        auto harmonicTotal = juce::jlimit(0.0f, 1.0f, weightA + weightB);
+
+        if (harmonicTotal < (separationBeta * (1.0f - harmonicTotal)))
+        {
+            weightA = 0.0f;
+            weightB = 0.0f;
+            harmonicTotal = 0.0f;
+        }
+
         maskA[static_cast<size_t>(bin)] = weightA;
         maskB[static_cast<size_t>(bin)] = weightB;
-
-        const auto harmonicTotal = juce::jlimit(0.0f, 1.0f, weightA + weightB);
         maskN[static_cast<size_t>(bin)] = 1.0f - harmonicTotal;
+    }
+
+    for (int bin = 0; bin <= nyquistBin; ++bin)
+    {
+        const auto index = static_cast<size_t>(bin);
+
+        auto blendedA = (maskSmoothAlpha * prevMaskA[index]) + ((1.0f - maskSmoothAlpha) * maskA[index]);
+        auto blendedB = (maskSmoothAlpha * prevMaskB[index]) + ((1.0f - maskSmoothAlpha) * maskB[index]);
+        auto blendedN = (maskSmoothAlpha * prevMaskN[index]) + ((1.0f - maskSmoothAlpha) * maskN[index]);
+
+        const auto blendedTotal = blendedA + blendedB + blendedN;
+
+        if (blendedTotal > 1.0e-12f)
+        {
+            const auto invTotal = 1.0f / blendedTotal;
+            blendedA *= invTotal;
+            blendedB *= invTotal;
+            blendedN *= invTotal;
+        }
+        else
+        {
+            blendedA = 0.0f;
+            blendedB = 0.0f;
+            blendedN = 1.0f;
+        }
+
+        maskA[index] = blendedA;
+        maskB[index] = blendedB;
+        maskN[index] = blendedN;
+
+        prevMaskA[index] = blendedA;
+        prevMaskB[index] = blendedB;
+        prevMaskN[index] = blendedN;
     }
 }
 
@@ -479,16 +596,97 @@ void ChannelSpectralSplitter::applyMasksAndReconstructFrame()
     nonHarmonicsSpectrum.fill(0.0f);
 
     constexpr int nyquistBin = fftSize / 2;
+    const auto refineWeights = [](float initialA,
+                                  float initialB,
+                                  float initialN,
+                                  float fallbackA,
+                                  float fallbackB,
+                                  float fallbackN,
+                                  float& refinedA,
+                                  float& refinedB,
+                                  float& refinedN)
+    {
+        constexpr float localEpsilon = 1.0e-12f;
+
+        const auto totalMagnitude = initialA + initialB + initialN + localEpsilon;
+        const auto wA = std::pow(initialA / totalMagnitude, ChannelSpectralSplitter::wienerExponent);
+        const auto wB = std::pow(initialB / totalMagnitude, ChannelSpectralSplitter::wienerExponent);
+        const auto wN = std::pow(initialN / totalMagnitude, ChannelSpectralSplitter::wienerExponent);
+        const auto wTotal = wA + wB + wN;
+
+        if (wTotal > localEpsilon)
+        {
+            refinedA = wA / wTotal;
+            refinedB = wB / wTotal;
+            refinedN = wN / wTotal;
+            return;
+        }
+
+        const auto fallbackTotal = fallbackA + fallbackB + fallbackN;
+
+        if (fallbackTotal > localEpsilon)
+        {
+            const auto invFallbackTotal = 1.0f / fallbackTotal;
+            refinedA = fallbackA * invFallbackTotal;
+            refinedB = fallbackB * invFallbackTotal;
+            refinedN = fallbackN * invFallbackTotal;
+        }
+        else
+        {
+            refinedA = 0.0f;
+            refinedB = 0.0f;
+            refinedN = 1.0f;
+        }
+    };
 
     const auto dcSource = inputSpectrum[0];
-    harmonicsASpectrum[0] = dcSource * maskA[0];
-    harmonicsBSpectrum[0] = dcSource * maskB[0];
-    nonHarmonicsSpectrum[0] = dcSource * maskN[0];
+    const auto dcWeightA = maskA[0];
+    const auto dcWeightB = maskB[0];
+    const auto dcWeightN = maskN[0];
+
+    const auto dcMagnitude = std::abs(dcSource);
+    const auto dcInitialA = dcMagnitude * dcWeightA;
+    const auto dcInitialB = dcMagnitude * dcWeightB;
+    const auto dcInitialN = dcMagnitude * dcWeightN;
+
+    float dcRefinedA = 0.0f;
+    float dcRefinedB = 0.0f;
+    float dcRefinedN = 1.0f;
+
+    refineWeights(dcInitialA, dcInitialB, dcInitialN, dcWeightA, dcWeightB, dcWeightN, dcRefinedA, dcRefinedB, dcRefinedN);
+
+    maskA[0] = dcRefinedA;
+    maskB[0] = dcRefinedB;
+    maskN[0] = dcRefinedN;
+
+    harmonicsASpectrum[0] = dcSource * dcRefinedA;
+    harmonicsBSpectrum[0] = dcSource * dcRefinedB;
+    nonHarmonicsSpectrum[0] = dcSource * dcRefinedN;
 
     const auto nyquistSource = inputSpectrum[1];
-    harmonicsASpectrum[1] = nyquistSource * maskA[static_cast<size_t>(nyquistBin)];
-    harmonicsBSpectrum[1] = nyquistSource * maskB[static_cast<size_t>(nyquistBin)];
-    nonHarmonicsSpectrum[1] = nyquistSource * maskN[static_cast<size_t>(nyquistBin)];
+    const auto nyquistIndex = static_cast<size_t>(nyquistBin);
+    const auto nyWeightA = maskA[nyquistIndex];
+    const auto nyWeightB = maskB[nyquistIndex];
+    const auto nyWeightN = maskN[nyquistIndex];
+
+    const auto nyquistMagnitude = std::abs(nyquistSource);
+    const auto nyInitialA = nyquistMagnitude * nyWeightA;
+    const auto nyInitialB = nyquistMagnitude * nyWeightB;
+    const auto nyInitialN = nyquistMagnitude * nyWeightN;
+
+    float nyRefinedA = 0.0f;
+    float nyRefinedB = 0.0f;
+    float nyRefinedN = 1.0f;
+
+    refineWeights(nyInitialA, nyInitialB, nyInitialN, nyWeightA, nyWeightB, nyWeightN, nyRefinedA, nyRefinedB, nyRefinedN);
+
+    maskA[nyquistIndex] = nyRefinedA;
+    maskB[nyquistIndex] = nyRefinedB;
+    maskN[nyquistIndex] = nyRefinedN;
+
+    harmonicsASpectrum[1] = nyquistSource * nyRefinedA;
+    harmonicsBSpectrum[1] = nyquistSource * nyRefinedB;
+    nonHarmonicsSpectrum[1] = nyquistSource * nyRefinedN;
 
     for (int bin = 1; bin < nyquistBin; ++bin)
     {
@@ -503,9 +701,32 @@ void ChannelSpectralSplitter::applyMasksAndReconstructFrame()
         const auto sourceMagnitude = std::sqrt((real * real) + (imaginary * imaginary));
         const auto sourcePhase = std::atan2(imaginary, real);
 
+        const auto initialMagnitudeA = sourceMagnitude * weightA;
+        const auto initialMagnitudeB = sourceMagnitude * weightB;
+        const auto initialMagnitudeN = sourceMagnitude * weightN;
+
+        float refinedWeightA = 0.0f;
+        float refinedWeightB = 0.0f;
+        float refinedWeightN = 1.0f;
+
+        refineWeights(
+            initialMagnitudeA,
+            initialMagnitudeB,
+            initialMagnitudeN,
+            weightA,
+            weightB,
+            weightN,
+            refinedWeightA,
+            refinedWeightB,
+            refinedWeightN);
+
+        maskA[static_cast<size_t>(bin)] = refinedWeightA;
+        maskB[static_cast<size_t>(bin)] = refinedWeightB;
+        maskN[static_cast<size_t>(bin)] = refinedWeightN;
+
         auto lockedPhase = sourcePhase;
 
-        const auto harmonicStrength = juce::jlimit(0.0f, 1.0f, weightA + weightB);
+        const auto harmonicStrength = juce::jlimit(0.0f, 1.0f, refinedWeightA + refinedWeightB);
 
         if (harmonicStrength > 0.0f)
         {
@@ -524,9 +745,9 @@ void ChannelSpectralSplitter::applyMasksAndReconstructFrame()
         const auto realOriginalPhase = std::cos(sourcePhase);
         const auto imagOriginalPhase = std::sin(sourcePhase);
 
-        const auto magnitudeA = sourceMagnitude * weightA;
-        const auto magnitudeB = sourceMagnitude * weightB;
-        const auto magnitudeN = sourceMagnitude * weightN;
+        const auto magnitudeA = sourceMagnitude * refinedWeightA;
+        const auto magnitudeB = sourceMagnitude * refinedWeightB;
+        const auto magnitudeN = sourceMagnitude * refinedWeightN;
 
         harmonicsASpectrum[static_cast<size_t>(coefficientIndex)] = magnitudeA * realHarmonicPhase;
         harmonicsASpectrum[static_cast<size_t>(coefficientIndex + 1)] = magnitudeA * imagHarmonicPhase;
@@ -602,6 +823,7 @@ HarmonicSplitAudioProcessor::HarmonicSplitAudioProcessor()
     harmonicWidthParam = apvts.getRawParameterValue("harmonic_width");
     harmonicsBalanceParam = apvts.getRawParameterValue("harmonics_balance");
     slopeParam = apvts.getRawParameterValue("slope");
+    separationParam = apvts.getRawParameterValue("separation");
     gainAParam = apvts.getRawParameterValue("gain_a");
     gainBParam = apvts.getRawParameterValue("gain_b");
     gainNonharmParam = apvts.getRawParameterValue("gain_nonharm");
@@ -636,6 +858,12 @@ HarmonicSplitAudioProcessor::APVTS::ParameterLayout HarmonicSplitAudioProcessor:
         "Slope",
         juce::NormalisableRange<float>(0.25f, 4.0f, 0.01f),
         1.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID { "separation", 1 },
+        "Separation",
+        juce::NormalisableRange<float>(1.0f, 8.0f, 0.1f),
+        2.0f));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID { "gain_a", 1 },
@@ -772,13 +1000,14 @@ void HarmonicSplitAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     const auto harmonicWidth = harmonicWidthParam != nullptr ? harmonicWidthParam->load(std::memory_order_relaxed) : 1.0f;
     const auto harmonicsBalance = harmonicsBalanceParam != nullptr ? harmonicsBalanceParam->load(std::memory_order_relaxed) : 0.0f;
     const auto slope = slopeParam != nullptr ? slopeParam->load(std::memory_order_relaxed) : 1.0f;
+    const auto separation = separationParam != nullptr ? separationParam->load(std::memory_order_relaxed) : 2.0f;
     const auto gainADb = gainAParam != nullptr ? gainAParam->load(std::memory_order_relaxed) : 0.0f;
     const auto gainBDb = gainBParam != nullptr ? gainBParam->load(std::memory_order_relaxed) : 0.0f;
     const auto gainNonharmDb = gainNonharmParam != nullptr ? gainNonharmParam->load(std::memory_order_relaxed) : 0.0f;
     const auto outputModeValue = outputModeParam != nullptr ? outputModeParam->load(std::memory_order_relaxed) : 0.0f;
 
     for (auto& splitter : channelSplitters)
-        splitter.setRuntimeParameters(smoothnessMs, harmonicWidth, harmonicsBalance, slope);
+        splitter.setRuntimeParameters(smoothnessMs, harmonicWidth, harmonicsBalance, slope, separation);
 
     auto inputBusBuffer = getBusBuffer(buffer, true, 0);
     auto mainOutputBus = getBusBuffer(buffer, false, 0);
