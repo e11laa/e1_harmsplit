@@ -35,7 +35,7 @@ private:
 
     juce::Label titleLabel;
     juce::Label outputModeLabel;
-    juce::ComboBox outputModeBox;
+    juce::ComboBox outputModeComboBox;
     std::unique_ptr<ComboBoxAttachment> outputModeAttachment;
 
     std::array<Control, 6> controls;

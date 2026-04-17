@@ -13,9 +13,9 @@ HarmonicSplitAudioProcessorEditor::HarmonicSplitAudioProcessorEditor(HarmonicSpl
     outputModeLabel.setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(outputModeLabel);
 
-    outputModeBox.addItemList(juce::StringArray { "All", "Harmonics A", "Harmonics B", "Non-harmonics" }, 1);
-    addAndMakeVisible(outputModeBox);
-    outputModeAttachment = std::make_unique<ComboBoxAttachment>(processor.getAPVTS(), "outputMode", outputModeBox);
+    outputModeComboBox.addItemList(juce::StringArray { "All", "Harmonics A", "Harmonics B", "Non-harmonics" }, 1);
+    addAndMakeVisible(outputModeComboBox);
+    outputModeAttachment = std::make_unique<ComboBoxAttachment>(processor.getAPVTS(), "outputMode", outputModeComboBox);
 
     const std::array<std::pair<juce::String, juce::String>, 6> controlDefinitions {
         std::pair { juce::String("Smoothness (ms)"), juce::String("smoothness") },
@@ -61,7 +61,7 @@ void HarmonicSplitAudioProcessorEditor::resized()
 
     auto modeRow = bounds.removeFromTop(30);
     outputModeLabel.setBounds(modeRow.removeFromLeft(120));
-    outputModeBox.setBounds(modeRow.removeFromLeft(220));
+    outputModeComboBox.setBounds(modeRow.removeFromLeft(220));
 
     bounds.removeFromTop(8);
 
