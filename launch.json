@@ -1,0 +1,19 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug in Ableton Live 12 Beta",
+            "type": "cppvsdbg",
+            "request": "launch",
+            // 使用するDAWの実行ファイル(.exe)のフルパスを記述します
+            // バージョン番号やインストール先が異なる場合は書き換えてください
+            "program": "C:\\ProgramData\\Ableton\\Live 12 Beta\\Program\\Ableton Live 12 Beta.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            // 出力先をVSCodeのデバッグコンソールに指定する重要な設定です
+            "console": "internalConsole"
+        }
+    ]
+}
