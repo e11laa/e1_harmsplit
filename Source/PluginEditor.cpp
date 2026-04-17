@@ -24,10 +24,11 @@ HarmonicSplitAudioProcessorEditor::HarmonicSplitAudioProcessorEditor(HarmonicSpl
     addAndMakeVisible(outputModeComboBox);
     outputModeAttachment = std::make_unique<ComboBoxAttachment>(processor.getAPVTS(), "outputMode", outputModeComboBox);
 
-    const std::array<std::pair<juce::String, juce::String>, 6> controlDefinitions {
+    const std::array<std::pair<juce::String, juce::String>, 7> controlDefinitions {
         std::pair { juce::String("Smoothness (ms)"), juce::String("smoothness") },
         std::pair { juce::String("Harmonic Width"), juce::String("harmonic_width") },
         std::pair { juce::String("Harmonics Balance"), juce::String("harmonics_balance") },
+        std::pair { juce::String("Slope"), juce::String("slope") },
         std::pair { juce::String("Gain A (dB)"), juce::String("gain_a") },
         std::pair { juce::String("Gain B (dB)"), juce::String("gain_b") },
         std::pair { juce::String("Gain Nonharm (dB)"), juce::String("gain_nonharm") }
@@ -51,7 +52,7 @@ HarmonicSplitAudioProcessorEditor::HarmonicSplitAudioProcessorEditor(HarmonicSpl
         control.attachment = std::make_unique<SliderAttachment>(processor.getAPVTS(), control.parameterId, control.slider);
     }
 
-    setSize(600, 400);
+    setSize(600, 460);
 }
 
 void HarmonicSplitAudioProcessorEditor::paint(juce::Graphics& g)
@@ -75,9 +76,9 @@ void HarmonicSplitAudioProcessorEditor::resized()
     bounds.removeFromTop(6);
 
     const auto columns = 3;
-    const auto rows = 2;
+    const auto rows = static_cast<int>((controls.size() + static_cast<size_t>(columns - 1)) / static_cast<size_t>(columns));
     const auto cellWidth = bounds.getWidth() / columns;
-    const auto cellHeight = bounds.getHeight() / rows;
+    const auto cellHeight = bounds.getHeight() / juce::jmax(1, rows);
 
     for (size_t index = 0; index < controls.size(); ++index)
     {

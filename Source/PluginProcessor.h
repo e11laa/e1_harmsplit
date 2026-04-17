@@ -27,7 +27,10 @@ public:
                       float* nonHarmonicsOutput,
                       int numSamples);
 
-    void setRuntimeParameters(float smoothnessMs, float harmonicWidth, float harmonicsBalance);
+    void setRuntimeParameters(float smoothnessMs,
+                              float harmonicWidth,
+                              float harmonicsBalance,
+                              float slope);
     void setDebugOutput(bool shouldOutput, juce::String label);
     float getSmoothedF0Hz() const noexcept;
 
@@ -38,6 +41,11 @@ private:
     static constexpr float spectralContrastThreshold = 5.0f;
     static constexpr float harmonicToleranceBinsBase = 1.5f;
     static constexpr float harmonicToleranceGrowth = 0.02f;
+    static constexpr float gaussianMaskCutoffSigma = 4.0f;
+    static constexpr float transientAttackRatioThreshold = 2.5f;
+    static constexpr float transientAttackDeltaThreshold = 0.015f;
+    static constexpr float transientFloorRms = 1.0e-4f;
+    static constexpr int phaseLockNeighbourBins = 2;
     static constexpr int medianFilterLength = 5;
     static constexpr int debugPrintIntervalFrames = 24;
 
@@ -45,9 +53,11 @@ private:
     void flushReadySamples();
 
     float estimateF0Hz(float framePower);
+    bool detectTransient(float framePower);
     float updateSmoothedF0(float candidateHz);
     float applyMedianFilter(float candidateHz);
-    void buildMasks(float trackedF0Hz);
+    void buildMasks(float trackedF0Hz, bool forceNonHarmonics);
+    int findPhaseLockPeakBin(int bin) const;
     void applyMasksAndReconstructFrame();
     void maybePrintDebugPitch();
     float measureIfftScale();
@@ -87,9 +97,11 @@ private:
     float smoothnessMs = 10.0f;
     float harmonicWidth = 1.0f;
     float harmonicsBalance = 0.0f;
+    float slope = 1.0f;
     float smoothingAlpha = 0.85f;
     float ifftScale = 1.0f;
     float smoothedF0Hz = 0.0f;
+    float previousFrameRms = 0.0f;
     bool debugOutputEnabled = false;
     juce::String debugLabel = "F0";
 };
@@ -155,6 +167,7 @@ private:
     std::atomic<float>* smoothnessParam = nullptr;
     std::atomic<float>* harmonicWidthParam = nullptr;
     std::atomic<float>* harmonicsBalanceParam = nullptr;
+    std::atomic<float>* slopeParam = nullptr;
     std::atomic<float>* gainAParam = nullptr;
     std::atomic<float>* gainBParam = nullptr;
     std::atomic<float>* gainNonharmParam = nullptr;
