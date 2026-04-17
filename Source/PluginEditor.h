@@ -38,5 +38,5 @@ private:
     juce::ComboBox outputModeComboBox;
     std::unique_ptr<ComboBoxAttachment> outputModeAttachment;
 
-    std::array<Control, 8> controls;
+    std::array<Control, 6> controls;
 };

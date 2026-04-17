@@ -182,9 +182,7 @@ private:
     std::atomic<float>* harmonicsBalanceParam = nullptr;
     std::atomic<float>* slopeParam = nullptr;
     std::atomic<float>* separationParam = nullptr;
-    std::atomic<float>* gainAParam = nullptr;
-    std::atomic<float>* gainBParam = nullptr;
-    std::atomic<float>* gainNonharmParam = nullptr;
+    std::atomic<float>* outGainParam = nullptr;
     std::atomic<float>* outputModeParam = nullptr;
 
     juce::File pitchLogFile;

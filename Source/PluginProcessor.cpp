@@ -824,9 +824,7 @@ HarmonicSplitAudioProcessor::HarmonicSplitAudioProcessor()
     harmonicsBalanceParam = apvts.getRawParameterValue("harmonics_balance");
     slopeParam = apvts.getRawParameterValue("slope");
     separationParam = apvts.getRawParameterValue("separation");
-    gainAParam = apvts.getRawParameterValue("gain_a");
-    gainBParam = apvts.getRawParameterValue("gain_b");
-    gainNonharmParam = apvts.getRawParameterValue("gain_nonharm");
+    outGainParam = apvts.getRawParameterValue("out_gain");
     outputModeParam = apvts.getRawParameterValue("outputMode");
 }
 
@@ -866,22 +864,8 @@ HarmonicSplitAudioProcessor::APVTS::ParameterLayout HarmonicSplitAudioProcessor:
         2.0f));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID { "gain_a", 1 },
-        "Gain A",
-        juce::NormalisableRange<float>(-96.0f, 12.0f, 0.1f),
-        0.0f,
-        juce::AudioParameterFloatAttributes().withLabel("dB")));
-
-    layout.add(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID { "gain_b", 1 },
-        "Gain B",
-        juce::NormalisableRange<float>(-96.0f, 12.0f, 0.1f),
-        0.0f,
-        juce::AudioParameterFloatAttributes().withLabel("dB")));
-
-    layout.add(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID { "gain_nonharm", 1 },
-        "Gain Nonharm",
+        juce::ParameterID { "out_gain", 1 },
+        "Out Gain",
         juce::NormalisableRange<float>(-96.0f, 12.0f, 0.1f),
         0.0f,
         juce::AudioParameterFloatAttributes().withLabel("dB")));
@@ -1001,9 +985,7 @@ void HarmonicSplitAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     const auto harmonicsBalance = harmonicsBalanceParam != nullptr ? harmonicsBalanceParam->load(std::memory_order_relaxed) : 0.0f;
     const auto slope = slopeParam != nullptr ? slopeParam->load(std::memory_order_relaxed) : 1.0f;
     const auto separation = separationParam != nullptr ? separationParam->load(std::memory_order_relaxed) : 2.0f;
-    const auto gainADb = gainAParam != nullptr ? gainAParam->load(std::memory_order_relaxed) : 0.0f;
-    const auto gainBDb = gainBParam != nullptr ? gainBParam->load(std::memory_order_relaxed) : 0.0f;
-    const auto gainNonharmDb = gainNonharmParam != nullptr ? gainNonharmParam->load(std::memory_order_relaxed) : 0.0f;
+    const auto outGainDb = outGainParam != nullptr ? outGainParam->load(std::memory_order_relaxed) : 0.0f;
     const auto outputModeValue = outputModeParam != nullptr ? outputModeParam->load(std::memory_order_relaxed) : 0.0f;
 
     for (auto& splitter : channelSplitters)
@@ -1035,10 +1017,6 @@ void HarmonicSplitAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             harmonicsBTempBuffer.getWritePointer(channel),
             nonHarmonicsTempBuffer.getWritePointer(channel),
             numSamples);
-
-    harmonicsATempBuffer.applyGain(juce::Decibels::decibelsToGain(gainADb));
-    harmonicsBTempBuffer.applyGain(juce::Decibels::decibelsToGain(gainBDb));
-    nonHarmonicsTempBuffer.applyGain(juce::Decibels::decibelsToGain(gainNonharmDb));
 
     const auto selectedOutputMode = juce::jlimit(
         static_cast<int>(outputAll),
@@ -1079,6 +1057,8 @@ void HarmonicSplitAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
     for (int channel = numChannels; channel < mainOutputBus.getNumChannels(); ++channel)
         mainOutputBus.clear(channel, 0, numSamples);
+
+    mainOutputBus.applyGain(juce::Decibels::decibelsToGain(outGainDb));
 
     const auto estimatedPitch = channelSplitters[0].getSmoothedF0Hz();
 
