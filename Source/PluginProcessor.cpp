@@ -62,10 +62,13 @@ void HarmonicSplitAudioProcessor::changeProgramName(int index, const juce::Strin
 
 void HarmonicSplitAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    juce::ignoreUnused(sampleRate);
+    for (size_t channel = 0; channel < stftProcessors.size(); ++channel)
+    {
+        auto& processor = stftProcessors[channel];
 
-    for (auto& processor : stftProcessors)
-        processor.prepare(samplesPerBlock);
+        processor.prepare(sampleRate, samplesPerBlock);
+        processor.setDebugOutput(channel == 0, channel == 0 ? "F0[L]" : "F0[R]");
+    }
 
     reconstructedBuffer.setSize(2, juce::jmax(1, samplesPerBlock), false, false, true);
 
