@@ -10,10 +10,17 @@ HarmonicSplitAudioProcessorEditor::HarmonicSplitAudioProcessorEditor(HarmonicSpl
     addAndMakeVisible(titleLabel);
 
     outputModeLabel.setText("Output Mode", juce::dontSendNotification);
-    outputModeLabel.setJustificationType(juce::Justification::centredLeft);
+    outputModeLabel.setJustificationType(juce::Justification::centred);
+    outputModeLabel.setFont(juce::Font(15.0f, juce::Font::bold));
     addAndMakeVisible(outputModeLabel);
 
     outputModeComboBox.addItemList(juce::StringArray { "All", "Harmonics A", "Harmonics B", "Non-harmonics" }, 1);
+    outputModeComboBox.setJustificationType(juce::Justification::centred);
+    outputModeComboBox.setTextWhenNothingSelected("Select Output Mode");
+    outputModeComboBox.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff1a232d));
+    outputModeComboBox.setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff44a9d8));
+    outputModeComboBox.setColour(juce::ComboBox::textColourId, juce::Colours::white);
+    outputModeComboBox.setColour(juce::ComboBox::arrowColourId, juce::Colour(0xff44a9d8));
     addAndMakeVisible(outputModeComboBox);
     outputModeAttachment = std::make_unique<ComboBoxAttachment>(processor.getAPVTS(), "outputMode", outputModeComboBox);
 
@@ -57,13 +64,15 @@ void HarmonicSplitAudioProcessorEditor::resized()
     auto bounds = getLocalBounds().reduced(16);
 
     titleLabel.setBounds(bounds.removeFromTop(36));
-    bounds.removeFromTop(8);
+    bounds.removeFromTop(6);
 
-    auto modeRow = bounds.removeFromTop(30);
-    outputModeLabel.setBounds(modeRow.removeFromLeft(120));
-    outputModeComboBox.setBounds(modeRow.removeFromLeft(220));
+    auto modeSection = bounds.removeFromTop(58);
+    outputModeLabel.setBounds(modeSection.removeFromTop(22));
 
-    bounds.removeFromTop(8);
+    auto comboArea = modeSection.reduced(0, 2);
+    outputModeComboBox.setBounds(comboArea.withSizeKeepingCentre(320, 28));
+
+    bounds.removeFromTop(6);
 
     const auto columns = 3;
     const auto rows = 2;
