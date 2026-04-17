@@ -1,0 +1,73 @@
+# e1_harmsplit: generated .gitignore
+# Ignores for CMake, Visual Studio, JUCE build artifacts, and editor/OS files
+
+# Build directories and CMake
+build/
+/build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CMakeLists.txt
+Makefile
+Testing/
+CTestTestfile.cmake
+
+# CMake multi-config output folders
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+
+# Visual Studio / MSVC
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.vcxproj.local
+*.suo
+*.user
+.vs/
+*.VC.db
+ipch/
+*.opendb
+
+# Build outputs and intermediate files
+*.exe
+*.dll
+*.lib
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exp
+*.mod
+
+# JUCE project artifacts
+JuceLibraryCode/
+*_artefacts/
+
+# Generated dependency folders
+_deps/
+
+# IDEs / editors
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+*.tmp
+*.temp
+*.cache
+*~
+*.swp
+
+# Misc
+coverage/
+/.sass-cache
