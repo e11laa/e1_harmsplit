@@ -1,5 +1,7 @@
 # Harmonic Split (JUCE)
 
+LATEST VST3 : https://www.mediafire.com/file/6tmsrviuxtyz1j2/Harmonic_Split.vst3/file
+
 Harmonic Split is a JUCE-based spectral audio effect inspired by Bitwig Studio's Harmonic Split concept.
 The plugin performs real-time STFT analysis, estimates fundamental frequency (F0), separates spectral content into three layers, and outputs the selected layer through a single stereo output.
 
